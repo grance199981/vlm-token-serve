@@ -49,6 +49,7 @@ def main(argv=None) -> int:
     m.add_argument("--task", default="vts_chartqa")
 
     args = ap.parse_args(argv)
+    sys.stdout.reconfigure(line_buffering=True)  # progress lines reach a redirected log at once
     if args.cmd == "summarize":
         if args.kind == "serve":
             print(json.dumps(serve_gains(load_serve_points(args.dirs)), indent=1))

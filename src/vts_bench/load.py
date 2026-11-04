@@ -87,6 +87,7 @@ def run_load(run: LoadRun, log=print) -> int:
                     if run.gpu and gpu_busy(run.gpu):
                         raise RuntimeError(f"GPU {run.gpu} is in use by another process; not starting")
                     srv_name = f"{model}_{method.label}_b{budget}_rep{rep}"
+                    log(f"{srv_name}: starting vllm serve")
                     spec = server_spec(run, model, method, budget)
                     with VLLMServer(spec, run.out / f"serve_{srv_name}.log") as srv:
                         log(f"{srv_name}: healthy, plugin log lines {srv.log_count('vts_plugin')}")

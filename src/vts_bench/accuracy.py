@@ -49,6 +49,7 @@ def run_accuracy(run: AccuracyRun, log=print) -> int:
             if run.gpu and gpu_busy(run.gpu):
                 raise RuntimeError(f"GPU {run.gpu} is in use by another process; not starting")
             cfg_dir = run.out / model / method.label
+            log(f"{model}/{method.label}: starting vllm serve")
             spec = ServerSpec(run.root, model, method, port=run.port, max_model_len=ACCURACY_MAX_MODEL_LEN,
                               limit_images=ACCURACY_LIMIT_IMAGES, extra_args=ACCURACY_SERVE_ARGS)
             failed_tasks = 0
