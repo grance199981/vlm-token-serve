@@ -4,6 +4,8 @@
 # give the same answers unless the code changed behaviour. Nothing is installed or reinstalled.
 # Usage (from the repo root): bash experiments/w2/compare_builds.sh <run_dir>
 #   MODELS (default both), METHODS (default "random rate divprune_triton"), N_CHART (default 20)
+#   ALLOW_SHARED_GPU=1: start even if another process holds memory on the GPU (correctness
+#   check only; never for timing runs)
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/../common/env.sh"  # ROOT, PY, caches, GPU check
 RUN=${1:?run dir}
@@ -19,7 +21,7 @@ STATUS=0
 for M in "${MODELS[@]}"; do
   for METHOD in "${METHODS[@]}"; do
     for BUILD in checkout installed; do
-      if [ "$(nvidia-smi --query-compute-apps=gpu_uuid --format=csv,noheader | grep -c "$CUDA_VISIBLE_DEVICES")" -gt 0 ]; then
+      if [ "${ALLOW_SHARED_GPU:-0}" != 1 ] && [ "$(nvidia-smi --query-compute-apps=gpu_uuid --format=csv,noheader | grep -c "$CUDA_VISIBLE_DEVICES")" -gt 0 ]; then
         echo "[$(date -Is)] GPU busy before $M $METHOD $BUILD, abort"; exit 4
       fi
       TAG=${M}_${METHOD}_${BUILD}
