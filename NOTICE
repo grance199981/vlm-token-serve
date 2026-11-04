@@ -1,0 +1,12 @@
+vlm-token-serve
+Copyright 2026 The vlm-token-serve authors
+
+This product includes code adapted from vLLM (https://github.com/vllm-project/vllm),
+licensed under the Apache License, Version 2.0, Copyright contributors to the vLLM project:
+
+  - src/vts_plugin/select.py: the RATE selection (`rate`, `rate_pr`, `rate_orig`), ported from
+    vllm/multimodal/image_prune/rate.py in pull request #60963 (heads 06158cbe and 45333ba).
+  - tests/fixtures/rate_pr_45333ba.py: that file at head 45333ba, used as a test oracle.
+
+The DivPrune selection in src/vts_plugin/select.py follows the official DivPrune implementation
+(https://github.com/vbdi/divprune); no code is copied from it.

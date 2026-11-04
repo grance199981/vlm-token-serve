@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vlm-token-serve"
+version = "0.2.0"
+description = "Out-of-tree vLLM plugin for image visual-token compression (Qwen3-VL / Qwen3.5), with a serving and accuracy benchmark CLI"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.11"
+dependencies = ["torch", "numpy", "Pillow", "vllm==0.32.0"]
+
+[project.optional-dependencies]
+triton = ["triton"]
+eval = ["lmms-eval==0.7.3", "pyarrow"]
+test = ["pytest"]
+
+[project.scripts]
+vts-bench = "vts_bench.cli:main"
+
+[project.entry-points."vllm.general_plugins"]
+vts = "vts_plugin:register"
+
+[tool.setuptools.packages.find]
+where = ["src"]

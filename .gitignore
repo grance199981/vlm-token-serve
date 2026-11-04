@@ -1,0 +1,27 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.idea/
+.vscode/
+runs/
+outputs/
+logs/
+checkpoints/
+*.pth
+*.safetensors
+data/
+datasets/
+models/
+wandb/
+store/
+.env
+artifacts/
+cache/
+envs/
+docs/*.pdf
+
+# local launcher config (server paths), never published
+.remote-exec.json
+.claude/
+# figure data transcribed from the result tables
+!docs/results/data/
