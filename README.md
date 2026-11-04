@@ -2,77 +2,119 @@
 
 **English** | [中文](#中文)
 
-An out-of-tree [vLLM](https://github.com/vllm-project/vllm) plugin that compresses the visual tokens of image inputs, plus a benchmark CLI that measures where the savings show up in serving. Two models with different attention structures are compared under the same protocol:
+A single 896×896 image turns into about 780 tokens inside a vision-language model, more than ten times the length of a typical question. Many papers shrink this number and report the accuracy they keep. This repository asks the next question: **when the model is actually served with [vLLM](https://github.com/vllm-project/vllm), does sending fewer image tokens make serving faster, where does the speed-up come from, and how large is it?**
 
-- **Qwen3-VL-4B-Instruct**: full attention in every layer.
-- **Qwen3.5-4B**: hybrid attention, 8 of 32 layers use full attention and the rest use linear attention.
+It contains a vLLM plugin that compresses image tokens, a benchmark tool that measures the effect under realistic load, and the reports of every experiment.
 
-The plugin needs no attention scores, so it runs with vLLM's fused attention kernels and CUDA graphs. It is configured entirely through environment variables. When `VTS_METHOD` is unset, vLLM behaves exactly as stock.
+**Short answer** (Qwen3-VL-4B-Instruct and Qwen3.5-4B, one NVIDIA L40):
 
-## Results
+- **Shrinking the image beats dropping tokens.** At the same token budget, resizing the image before the vision encoder loses less accuracy on OCR-heavy tasks and gives more throughput (up to 2.1× against 1.6×) than selecting tokens after the encoder. Dropping tokens is ahead only on small scene text with Qwen3.5.
+- **The bottleneck decides where the gain shows up, and the model's attention design decides how big it is.** When KV-cache memory is the limit, halving the image tokens lets the full-attention model serve 1.75× more requests at once, but the hybrid-attention model only 1.27×.
+- **Engineering details change the result.** A slow token-selection step ate about half of DivPrune's throughput gain until a single Triton kernel made it 61× faster.
 
-All numbers come from `docs/results/`. Accuracy is compared only against each model's own uncompressed run (B0), with paired bootstrap 95% CIs. Serving was measured on one NVIDIA L40 48 GB with vLLM 0.32.0. Under sustained load the L40 hits its 300 W power cap, and bf16 SM clocks drop from about 2250 to 1550 MHz ([FOLLOWUP3](docs/results/FOLLOWUP3_RESULTS.md)). All throughput numbers are therefore measured at power-capped clocks.
+## 1. Two ways to send fewer image tokens
 
-![accuracy vs throughput](docs/figures/pareto.png)
+A request with an image goes through four stages, and each one costs something:
 
-![serving gain by workload](docs/figures/throughput_by_workload.png)
-
-| Finding | Qwen3-VL-4B-Instruct (full) | Qwen3.5-4B (hybrid) | Source |
-|---|---|---|---|
-| Prefill-bound throughput at keep 50%, concurrency 64. Downsampling skips part of the ViT, token pruning does not. | downsample 2.05–2.08×, random and RATE 1.57–1.63× | downsample 1.94–2.13×, random and RATE 1.49–1.61× | [W4 §5](docs/results/W4_RESULTS.md) |
-| KV-bound admitted concurrency at keep 50%, 4 GiB KV, concurrency 128 | 1.744–1.768× | 1.267–1.280× | [W4 §3](docs/results/W4_RESULTS.md) |
-| Decode-bound TPOT at keep 50%, concurrency 64 | −25.3% to −27.8% | −9.2% to −14.9% | [W4 §6](docs/results/W4_RESULTS.md) |
-| Prefix-cache capacity in multi-turn image chat (S\*, relative to B0) | 1.57–1.59× | 1.17–1.20× | [K2](docs/results/K2_RESULTS.md) |
-| Triton DivPrune kernel, one 784-token image at keep 50% | 25.66 → 0.419 ms (61×) | same kernel | [W5 §1](docs/results/W5_RESULTS.md) |
-| DivPrune throughput, prefill-bound, concurrency 64 (PyTorch → Triton) | 1.281× → 1.584× | 1.279× → 1.566× | [W5 §1](docs/results/W5_RESULTS.md) |
-| FP8 weights alone (OCR Δ) and FP8 + downsample 50%, prefill-bound, concurrency 64 | 1.450× (+0.02) and 3.053× | 1.558× (+0.01) and 3.062× | [W5 §2](docs/results/W5_RESULTS.md) |
-
-Main observations:
-
-1. **On the OCR average, downsampling is on the accuracy–throughput frontier for both models.** At keep 50% it loses 2.2 (Qwen3-VL) and 2.0 (Qwen3.5) points against 5.4 and 2.2 for RATE, at higher throughput. The one setting where pruning is not dominated is TextVQA (small scene text) on Qwen3.5, where RATE 50% changes accuracy by −0.4 [−1.2, +0.5] against −2.6 [−3.9, −1.3] for downsampling ([W4 §7](docs/results/W4_RESULTS.md), [W3](docs/results/W3_RESULTS.md)).
-2. **Attention structure decides how much of the KV saving turns into capacity.** Halving the visual tokens gives 1.75× admitted concurrency on full attention and 1.27× on hybrid attention, because most Qwen3.5 layers keep a constant-size recurrent state. A block-ledger model registered before the runs predicts the gain within 0.937–1.064 (measured over predicted) on two new conditions ([FOLLOWUP](docs/results/FOLLOWUP_RESULTS.md)).
-3. **On the hybrid model, compression can lower the prefix-cache hit rate.** Hits are aligned to 528-token blocks. After compression the shared prefix of turns 1–3 is shorter than 528 tokens, and with 8 sessions in rotation the hit rate drops from 53% to 29% ([K2](docs/results/K2_RESULTS.md)).
-4. **Selection cost matters at high load.** The PyTorch DivPrune loop is launch-bound (about 1600 small kernels per image). One Triton kernel brings it to the throughput of random selection with unchanged accuracy (difference ≤ 0.4 points).
-
-Accuracy of the uncompressed models through the same `vllm serve` path ([W1](docs/results/W1_RESULTS.md)):
-
-| Task (metric) | Qwen3-VL-4B-Instruct | Qwen3.5-4B |
+| Stage | What happens | What image tokens cost here |
 |---|---|---|
-| ChartQA test (relaxed acc.) | 84.04 [82.68, 85.48] | 85.28 [84.00, 86.64] |
-| TextVQA val (exact match) | 80.50 [79.47, 81.51] | 82.53 [81.62, 83.46] |
-| DocVQA val (ANLS) | 94.75 [94.21, 95.27] | 95.56 [95.06, 96.05] |
+| Vision encoder (ViT) | turns pixels into image tokens | compute, grows with the number of pixels |
+| Prefill | the language model reads the whole prompt once | compute, grows with the prompt length |
+| KV cache | the model keeps every prompt token in GPU memory while it answers | memory, limits how many requests run at once |
+| Decode | the model writes the answer one token at a time | each step reads the KV cache |
 
-OCR-average accuracy change against B0 ([W3 §4b.3](docs/results/W3_RESULTS.md)):
+There are two ways to cut the number of image tokens:
+
+- **Downsample**: resize the image before the vision encoder. Every later stage gets cheaper, including the encoder itself.
+- **Prune**: run the encoder on the full image, then keep only some of its output tokens. This repository implements random selection, 2×2 pooling, [DivPrune](https://github.com/vbdi/divprune) (keeps the most diverse tokens) and RATE from vLLM PR [#60963](https://github.com/vllm-project/vllm/pull/60963). Pruning can pick the informative tokens, but the encoder still runs at full cost.
+
+Both are compared at the same token budget (keep 50%, 25% and 12.5% of the tokens) against the same model without compression (called B0).
+
+## 2. How it was measured
+
+- **Two models with different attention designs.** Qwen3-VL-4B-Instruct uses full attention in every layer, so every token stays in the KV cache in every layer. Qwen3.5-4B is a hybrid: only 8 of its 32 layers use full attention, the rest keep a fixed-size state. One token costs 144 KiB of KV cache in Qwen3-VL and 32 KiB in Qwen3.5.
+- **Accuracy** on ChartQA, TextVQA and DocVQA (the OCR average below), plus MME and MMBench, through the same `vllm serve` path that serves traffic. Each method is compared with its own model's B0 question by question, with paired bootstrap 95% confidence intervals.
+- **Three serving workloads**, each built to hit one bottleneck. **P**: 4 images and a short answer, limited by prefill compute. **D**: 1 image and a 512-token answer, limited by decode. **K1**: a fixed 4 GiB KV cache, limited by memory.
+- **Hypotheses and pass criteria were written down before each run** ([`docs/plans/`](docs/plans/)). The reports state each verdict, including the hypotheses that turned out false.
+- Hardware note: under sustained load the L40 hits its 300 W power cap and its clock drops from about 2250 to 1550 MHz ([FOLLOWUP3](docs/results/FOLLOWUP3_RESULTS.md)). All throughput numbers are measured in this state, which is how the card behaves in production.
+
+## 3. Findings
+
+### 3.1 Accuracy: downsampling loses the least on OCR tasks
+
+Change of the OCR average against B0, in points ([W3](docs/results/W3_RESULTS.md)):
 
 | Model | Method | keep 50% | keep 25% | keep 12.5% |
 |---|---|---|---|---|
 | Qwen3-VL-4B-Instruct | downsample | **−2.2** | **−10.2** | **−22.5** |
-| | RATE (`rate`) | −5.4 | −24.4 | −41.1 |
+| | RATE | −5.4 | −24.4 | −41.1 |
 | | DivPrune | −6.3 | −18.5 | −34.8 |
 | | random | −8.7 | −26.2 | −44.1 |
 | Qwen3.5-4B | downsample | **−2.0** | **−9.0** | **−21.7** |
-| | RATE (`rate`) | −2.2 | −11.4 | −31.9 |
+| | RATE | −2.2 | −11.4 | −31.9 |
 | | DivPrune | −4.8 | −15.7 | −31.3 |
 | | random | −11.9 | −32.8 | −49.4 |
 
-## Methods
+A likely reason, not tested directly: charts and documents have large, dense text, and a smaller image keeps all of it, slightly blurred, while pruning removes whole regions that sometimes hold the answer. Pruning wins in one case: on TextVQA, where the text is a small part of a natural photo, RATE at keep 50% on Qwen3.5 changes accuracy by −0.4 [−1.2, +0.5] against −2.6 [−3.9, −1.3] for downsampling.
 
-| `VTS_METHOD` | What it does |
-|---|---|
-| `none` | plugin off (stock vLLM) |
-| `downsample` | resize each image by √keep per side before the HF processor |
-| `random` | fixed random subset per (seed, token count) |
-| `pool2x2` | average 2×2 blocks of the merged token grid |
-| `divprune` | greedy max-min diversity, following the [official DivPrune code](https://github.com/vbdi/divprune), `VTS_DIVPRUNE_IMPL=triton` for the fused kernel |
-| `rate` | RATE from vLLM PR [#60963](https://github.com/vllm-project/vllm/pull/60963) with a descending projection sort |
-| `rate_pr` | the PR as written at `06158cbe`. Its ascending sort always keeps a prefix of the tokens ([reported](https://github.com/vllm-project/vllm/pull/60963#issuecomment-6321576342)). |
-| `rate_orig` | the PR after the author's fix (`45333ba`), copied line for line |
+### 3.2 When compute is the bottleneck, pruning still pays for the vision encoder
 
-Other variables are `VTS_KEEP` (fraction kept, default 1.0), `VTS_SEED` (default 0), `VTS_TAIL`, `VTS_VIT_TRACE=<dir>` (per-call ViT timing) and `VTS_STEP_TRACE=<dir>` (per-step engine timing). See [`src/vts_plugin/config.py`](src/vts_plugin/config.py).
+In a single request the vision encoder takes about a quarter of the time to the first token. Pruning runs it on the full image, so that quarter does not shrink ([W4 §1](docs/results/W4_RESULTS.md)). Under full load on the prefill-bound workload P (concurrency 64, keep 50%), the gap shows up as throughput ([W4 §5](docs/results/W4_RESULTS.md)):
 
-How it plugs into vLLM: the multimodal processor shrinks each image placeholder to the kept token count, so the scheduler and the KV cache only see kept tokens. The model runs the vision tower in profile-sized groups, selects tokens, and re-places them at their original M-RoPE positions through vLLM's multimodal-pruning path. A walkthrough in Chinese is in [`docs/CODE_GUIDE_zh.md`](docs/CODE_GUIDE_zh.md), and the design notes are in [`docs/W2_PLUGIN_DESIGN.md`](docs/W2_PLUGIN_DESIGN.md).
+| | downsample | random, RATE | DivPrune |
+|---|---|---|---|
+| Throughput vs B0 | 1.94–2.13× | 1.49–1.63× | 1.19–1.32× |
 
-## Quick start
+Putting accuracy and throughput together, downsampling is on the frontier for both models. To reach the throughput of RATE at keep 25%, downsampling at keep 50% is enough and loses far less accuracy ([W4 §7](docs/results/W4_RESULTS.md)).
+
+![accuracy vs throughput](docs/figures/pareto.png)
+
+### 3.3 When memory is the bottleneck, the attention design decides the gain
+
+With a fixed KV cache (workload K1, keep 50%, concurrency 128), fewer image tokens per request means more requests fit in memory at once ([W4 §3](docs/results/W4_RESULTS.md)):
+
+| | Qwen3-VL-4B-Instruct (full attention) | Qwen3.5-4B (hybrid) |
+|---|---|---|
+| Requests running at once vs B0 | 1.744–1.768× | 1.267–1.280× |
+| Throughput vs B0, downsample | 1.81× | 1.43× |
+| Throughput vs B0, pruning | 1.43–1.62× | 1.12–1.26× |
+
+The hybrid model gains less because three quarters of its layers keep a fixed-size state that does not grow with the prompt, so cutting tokens frees less memory. A simple block-counting model of the KV cache, written down before the runs, predicted these gains within 4% and later predicted two new settings within 0.937–1.064 of the measured value ([FOLLOWUP](docs/results/FOLLOWUP_RESULTS.md)). The same pattern appears in decoding (workload D, concurrency 64): time per output token drops by 25–28% on Qwen3-VL and by 9–15% on Qwen3.5 ([W4 §6](docs/results/W4_RESULTS.md)).
+
+![serving gain by workload](docs/figures/throughput_by_workload.png)
+
+### 3.4 On the hybrid model, compression can lower the prefix-cache hit rate
+
+In a multi-turn chat about an image, vLLM reuses the cached tokens of earlier turns. Compression makes each conversation smaller, so more conversations fit in the cache: 1.57–1.59× more on Qwen3-VL, 1.17–1.20× on Qwen3.5. The hybrid model, however, can only reuse its cache in blocks of 528 tokens. After compression the shared history of turns 1 to 3 is shorter than one block, and with 8 conversations in rotation the hit rate falls from 53% to 29% ([K2](docs/results/K2_RESULTS.md)).
+
+### 3.5 Implementation cost matters at high load
+
+- **Token selection can cost as much as the encoder.** The PyTorch version of DivPrune picks tokens one at a time with about 1600 small GPU kernels per image, 25.66 ms in total. A single Triton kernel does the same in 0.419 ms (61× faster). Its throughput on workload P rises from 1.28× to 1.58×, the same as random selection, with unchanged accuracy ([W5](docs/results/W5_RESULTS.md)).
+- **Compression stacks with FP8 weights.** FP8 alone gives 1.45× (Qwen3-VL) and 1.56× (Qwen3.5) with no accuracy change. FP8 plus downsampling at keep 50% gives 3.05× and 3.06× ([W5](docs/results/W5_RESULTS.md)).
+
+### 3.6 What this means in practice
+
+Try downsampling first. On these models it gave the most throughput on every workload and the smallest loss on the OCR average. How much it buys depends on the bottleneck: about 2× when prefill compute is the limit, 1.4–1.8× when KV memory is the limit, and 1.3–1.4× when decoding is the limit. The memory-bound gain is much smaller on the hybrid-attention model. Token pruning was ahead only on small scene text with Qwen3.5. If you use it, make sure the selection step is fast. All numbers come from two 4B models on one GPU type with synthetic serving load. Other models, image sizes or hardware may shift the balance.
+
+## 4. How the plugin works
+
+The plugin is loaded by vLLM at start-up through its `vllm.general_plugins` entry point. It changes no vLLM code and does nothing unless `VTS_METHOD` is set.
+
+1. **Make room for fewer tokens.** When a request arrives, the plugin shrinks each image's placeholder in the prompt to the number of tokens that will be kept. From then on the scheduler and the KV cache only ever see the smaller number. Downsampling instead resizes the image at this point.
+2. **Run the vision encoder safely.** With pruning, vLLM's scheduler lets more images into one step than it measured at start-up, which can run out of GPU memory ([vllm#63187](https://github.com/vllm-project/vllm/issues/63187)). The plugin feeds the encoder in groups no larger than that measurement.
+3. **Pick the tokens and put them back in place.** The selected tokens are re-inserted at their original 2D positions (M-RoPE), so the model still knows where each one sits in the image. This reuses the path vLLM built for pruning video frames.
+
+A step-by-step walkthrough in Chinese, with line references, is in [`docs/CODE_GUIDE_zh.md`](docs/CODE_GUIDE_zh.md).
+
+## 5. Problems found along the way
+
+Building the plugin and the benchmark uncovered three problems in vLLM, reported upstream:
+
+- [vllm#63187](https://github.com/vllm-project/vllm/issues/63187): with pruning on, the scheduler budgets the vision encoder by the pruned token count. One step can then send several times the measured load to the encoder and run out of memory. The plugin works around it (step 2 above).
+- [vllm#62937](https://github.com/vllm-project/vllm/issues/62937): with transformers ≥ 5.10, the positions recomputed after Qwen3-VL video pruning are misaligned. With a short text prefix the server crashes, with a long one it silently uses wrong positions.
+- [A comment on PR #60963](https://github.com/vllm-project/vllm/pull/60963#issuecomment-6321576342): a sort-direction bug made RATE keep the first tokens of every image instead of the selected ones. The plugin keeps both the corrected version (`rate`) and the original (`rate_pr`).
+
+## 6. Use it
 
 ```bash
 # in an environment with vllm==0.32.0
@@ -80,62 +122,51 @@ pip install --no-deps .
 VTS_METHOD=downsample VTS_KEEP=0.5 vllm serve Qwen/Qwen3-VL-4B-Instruct
 ```
 
-The plugin is loaded through the `vllm.general_plugins` entry point in every vLLM process.
+| `VTS_METHOD` | What it does |
+|---|---|
+| `none` | plugin off (stock vLLM) |
+| `downsample` | resize each image by √keep per side before preprocessing |
+| `random` | a fixed random subset of tokens |
+| `pool2x2` | average each 2×2 block of tokens |
+| `divprune` | keep the most diverse tokens. Add `VTS_DIVPRUNE_IMPL=triton` for the fast kernel |
+| `rate` | RATE with the corrected sort direction |
+| `rate_pr` | RATE exactly as first written in PR #60963 |
+| `rate_orig` | RATE after the PR author's fix (`45333ba`) |
 
-## Benchmark CLI
+`VTS_KEEP` sets the fraction of tokens kept (default 1.0). `VTS_VIT_TRACE=<dir>` and `VTS_STEP_TRACE=<dir>` record per-call encoder timing and per-step engine timing. All options are listed in [`src/vts_plugin/config.py`](src/vts_plugin/config.py).
 
-`vts-bench` reproduces the measurement protocol: one server per (model, method), a discarded warm-up with its own seed, per-point seeds shared across methods for paired comparison, and closed-loop synthetic load through `vllm bench serve`.
+`vts-bench` runs the measurements above with the same protocol: a fresh server for every model and method, a discarded warm-up, and the same request seeds across methods so results can be compared request by request.
 
 ```bash
-export VTS_ROOT=/path/to/root               # envs/vts, models/<name>, tasks_local/
-export CUDA_VISIBLE_DEVICES=GPU-xxxxxxxx    # a GPU UUID; the CLI refuses a busy GPU
+export VTS_ROOT=/path/to/root               # holds envs/vts, models/<name>, tasks_local/
+export CUDA_VISIBLE_DEVICES=GPU-xxxxxxxx    # a GPU UUID; refuses to start on a busy GPU
 vts-bench serve --preset P --methods none downsample random rate divprune_triton --concurrency 1 8 32 64 --out runs/p
 vts-bench serve --preset K1 --kv-bytes 4294967296 --concurrency 128 --out runs/k1
 vts-bench summarize serve runs/p/results    # gains vs B0, paired per repetition
 vts-bench accuracy --methods none downsample --tasks vts_chartqa vts_textvqa_val --out runs/acc
 ```
 
-| Preset | Request shape | Bottleneck |
+## 7. Reproduce the results
+
+Each report in [`docs/results/`](docs/results/) names the scripts in [`experiments/`](experiments/) that produced it, one folder per milestone, and the plan it was judged against.
+
+| Report | What it covers | Scripts |
 |---|---|---|
-| `P` | 4 images 896×896, 64 text tokens in, 32 out | prefill compute, swept over `--max-num-batched-tokens` 2048 and 8192 |
-| `D` | 1 image, 512 out | decode |
-| `K1` | 2 images, 256 out, same KV byte budget for both models | KV capacity |
+| [W1](docs/results/W1_RESULTS.md) | uncompressed accuracy and serving baselines | `experiments/w1/` |
+| [W2](docs/results/W2_RESULTS.md) | plugin correctness, cross-check against Hugging Face transformers | `experiments/w2/` |
+| [W3](docs/results/W3_RESULTS.md) | accuracy of every method at three budgets | `experiments/w3/`, `experiments/routec/` |
+| [W4](docs/results/W4_RESULTS.md) | serving workloads P, D, K1 and the accuracy–throughput frontier | `experiments/w4/` |
+| [W5](docs/results/W5_RESULTS.md) | Triton DivPrune and FP8 | `experiments/w5/` |
+| [K2](docs/results/K2_RESULTS.md), [FOLLOWUP](docs/results/FOLLOWUP_RESULTS.md), [FOLLOWUP2](docs/results/FOLLOWUP2_RESULTS.md), [FOLLOWUP3](docs/results/FOLLOWUP3_RESULTS.md) | prefix caching, memory model checks, power-capped clocks | `experiments/w6/` |
 
-`tests/test_bench.py` checks that the CLI builds the same `vllm serve`, `vllm bench serve` and lmms-eval commands as the original runners and gives identical statistics on the same inputs.
-
-## Reproducing the published numbers
-
-The tables above were produced by the scripts in `experiments/`, one directory per milestone. Each script documents its usage in its header. `experiments/common/env.sh` holds the shared environment.
-
-| Results | Scripts |
-|---|---|
-| [W1](docs/results/W1_RESULTS.md) baselines | `experiments/w1/` (accuracy, serving), `experiments/w0/` (environment smoke tests) |
-| [W2](docs/results/W2_RESULTS.md) plugin integration, HF cross-check | `experiments/w2/` |
-| [W3](docs/results/W3_RESULTS.md) accuracy sweep | `experiments/w3/`, `experiments/routec/` |
-| [W4](docs/results/W4_RESULTS.md) serving (P, D, K1, Pareto) | `experiments/w4/` |
-| [W5](docs/results/W5_RESULTS.md) Triton DivPrune, FP8 | `experiments/w5/` |
-| [K2](docs/results/K2_RESULTS.md), [FOLLOWUP](docs/results/FOLLOWUP_RESULTS.md), [FOLLOWUP2](docs/results/FOLLOWUP2_RESULTS.md), [FOLLOWUP3](docs/results/FOLLOWUP3_RESULTS.md) | `experiments/w6/` |
-| upstream reproducers | `experiments/d/` |
-| figures | `experiments/plots/make_figures.py` (from `docs/results/data/*.csv`) |
-
-Hypotheses and pass criteria were written down before each run in [`docs/plans/`](docs/plans/). The result files report each verdict against them, including the hypotheses that were falsified.
-
-`tests/test_selection_hashes.py` locks the token selection of every method to the code version that produced these results.
-
-## Upstream reports
-
-- [vllm-project/vllm#63187](https://github.com/vllm-project/vllm/issues/63187): with multimodal pruning on, the scheduler debits the encoder budget by the pruned token count, so one step can admit several times the profiled ViT input and run out of memory. Reproducer in `experiments/d/encoder_budget_repro.py`. The plugin works around it in `src/vts_plugin/vitbatch.py`.
-- [vllm-project/vllm#62937](https://github.com/vllm-project/vllm/issues/62937): with transformers ≥ 5.10, the M-RoPE positions recomputed after Qwen3-VL video pruning are misaligned (a crash with a short text prefix, silently wrong positions with a long one). Reproducible on CPU with `experiments/d/evs_outer_vs_min_repro.py`.
-- [Comment on PR #60963](https://github.com/vllm-project/vllm/pull/60963#issuecomment-6321576342): the ascending sort in RATE makes the bucket denominator negative, so the PR keeps a prefix of the tokens for every input.
-
-## Repository layout
+Three checks keep the code tied to the published numbers. `tests/test_selection_hashes.py` locks every selection method to the version that produced the results. `tests/test_bench.py` checks that `vts-bench` builds the same commands and computes the same statistics as the original scripts. `experiments/w2/compare_builds.sh` serves the same questions with two plugin builds and compares the answers.
 
 ```
-src/vts_plugin/   the vLLM plugin (selection methods, Triton kernel, M-RoPE recompute, ViT grouping, traces)
-src/vts_bench/    the vts-bench CLI
-tests/            CPU tests (GPU, Triton and vLLM tests skip when unavailable)
+src/vts_plugin/   the vLLM plugin
+src/vts_bench/    the vts-bench command line
+tests/            unit tests (GPU, Triton and vLLM tests skip when unavailable)
 experiments/      the scripts behind the published numbers
-docs/results/     result reports (Chinese), with tables and verdicts
+docs/results/     experiment reports (Chinese)
 docs/plans/       pre-registered plans and criteria (Chinese)
 ```
 
@@ -147,77 +178,119 @@ Apache-2.0. `rate_pr`, `rate_orig` and `tests/fixtures/rate_pr_45333ba.py` are a
 
 ## 中文
 
-一个 [vLLM](https://github.com/vllm-project/vllm) 树外插件，对图像输入的视觉 token 做压缩，并附带一个评测命令行，用来测量压缩在 serving 中的收益具体体现在哪里。同一套协议下对比两种注意力结构：
+一张 896×896 的图片进入视觉语言模型后，大约变成 780 个 token，是一个普通问题长度的十几倍。很多论文研究怎么减少这些 token，并报告精度能保住多少。这个仓库接着问下一个问题：**模型真正用 [vLLM](https://github.com/vllm-project/vllm) 部署成服务时，少送一些图像 token 能不能让服务变快？快在哪里？快多少？**
 
-- **Qwen3-VL-4B-Instruct**：每一层都是全注意力。
-- **Qwen3.5-4B**：混合注意力，32 层里 8 层是全注意力，其余是线性注意力。
+仓库里有三样东西：一个压缩图像 token 的 vLLM 插件，一个在真实负载下测量效果的评测工具，以及每一项实验的报告。
 
-插件不依赖注意力分数，所以可以照常使用 vLLM 的融合注意力 kernel 和 CUDA graph。配置全部通过环境变量完成。不设 `VTS_METHOD` 时，vLLM 的行为与原版完全一致。
+**简短的回答**（Qwen3-VL-4B-Instruct 和 Qwen3.5-4B，单张 NVIDIA L40）：
 
-### 结果
+- **缩小图片比丢弃 token 更好。** 在相同的 token 预算下，在视觉编码器之前把图片缩小，比在编码器之后挑选 token，在 OCR 类任务上掉的精度更少，吞吐提升也更大（最高 2.1× 对 1.6×）。丢 token 只在 Qwen3.5 的自然场景小字任务上领先。
+- **瓶颈决定收益出现在哪里，模型的注意力结构决定收益有多大。** KV 缓存显存是瓶颈时，图像 token 减半，全注意力模型能同时服务的请求数提高到 1.75×，混合注意力模型只有 1.27×。
+- **工程细节会改变结论。** DivPrune 挑选 token 的步骤太慢，吃掉了它大约一半的吞吐收益，换成一个 Triton kernel 后快了 61 倍。
 
-数字全部来自 `docs/results/`。精度只和各模型自己的不压缩运行（B0）比较，区间是配对 bootstrap 95% CI。serving 在单张 NVIDIA L40 48 GB 上测量，vLLM 0.32.0。持续高负载时 L40 触及 300 W 功耗上限，bf16 的 SM 时钟从约 2250 MHz 降到约 1550 MHz（[FOLLOWUP3](docs/results/FOLLOWUP3_RESULTS.md)），所以所有吞吐数字都是在功耗降频状态下测得的。
+### 1. 少送图像 token 的两种做法
 
-**精度–吞吐**：横轴是 P 负载（prefill 受限）并发 64 时相对 B0 的吞吐倍数，纵轴是 OCR 平均（TextVQA、ChartQA、DocVQA）相对 B0 的精度变化，点旁标的是保留率。
+一个带图请求要经过四个阶段，每个阶段都有成本：
 
-![精度与吞吐](docs/figures/pareto.png)
-
-**不同负载下的吞吐收益**：保留 50%，从左到右依次是 P（prefill 受限，4 张图、输出 32）、D（decode 受限，1 张图、输出 512）、K1（KV 受限，KV 4 GiB、2 张图）三种负载。
-
-![不同负载下的吞吐收益](docs/figures/throughput_by_workload.png)
-
-| 发现 | Qwen3-VL-4B-Instruct（全注意力） | Qwen3.5-4B（混合注意力） | 出处 |
-|---|---|---|---|
-| prefill 受限负载的吞吐，保留 50%，并发 64。降分辨率省掉一部分 ViT 计算，裁剪省不掉 | 降分辨率 2.05–2.08×，随机和 RATE 1.57–1.63× | 降分辨率 1.94–2.13×，随机和 RATE 1.49–1.61× | [W4 §5](docs/results/W4_RESULTS.md) |
-| KV 受限负载的准入并发，保留 50%，KV 4 GiB，并发 128 | 1.744–1.768× | 1.267–1.280× | [W4 §3](docs/results/W4_RESULTS.md) |
-| decode 受限负载的 TPOT，保留 50%，并发 64 | −25.3% 到 −27.8% | −9.2% 到 −14.9% | [W4 §6](docs/results/W4_RESULTS.md) |
-| 多轮带图会话的前缀缓存容量（S\*，相对 B0） | 1.57–1.59× | 1.17–1.20× | [K2](docs/results/K2_RESULTS.md) |
-| Triton DivPrune kernel，一张 784 token 的图，保留 50% | 25.66 → 0.419 ms（61×） | 同一个 kernel | [W5 §1](docs/results/W5_RESULTS.md) |
-| DivPrune 吞吐，prefill 受限，并发 64（PyTorch → Triton） | 1.281× → 1.584× | 1.279× → 1.566× | [W5 §1](docs/results/W5_RESULTS.md) |
-| 单用 FP8 权重（OCR Δ），以及 FP8 + 降分辨率 50%，prefill 受限，并发 64 | 1.450×（+0.02），3.053× | 1.558×（+0.01），3.062× | [W5 §2](docs/results/W5_RESULTS.md) |
-
-主要结论：
-
-1. **按 OCR 平均，降分辨率在两个模型上都处于精度–吞吐前沿。** 保留 50% 时掉 2.2 分（Qwen3-VL）和 2.0 分（Qwen3.5），RATE 掉 5.4 分和 2.2 分，而且降分辨率的吞吐更高。裁剪唯一不被支配的位置是 Qwen3.5 的 TextVQA（自然场景小字）：RATE 50% 精度变化 −0.4 [−1.2, +0.5]，降分辨率 −2.6 [−3.9, −1.3]（[W4 §7](docs/results/W4_RESULTS.md)、[W3](docs/results/W3_RESULTS.md)）。
-2. **注意力结构决定了 KV 节省能有多少转化成容量。** 视觉 token 减半后，全注意力的准入并发提高到 1.75×，混合注意力只有 1.27×，因为 Qwen3.5 的大多数层保存的是大小固定的循环状态。运行前登记的块账本模型在两个新条件下预测准入增益，实测 ÷ 预测在 0.937–1.064 之间（[FOLLOWUP](docs/results/FOLLOWUP_RESULTS.md)）。
-3. **在混合模型上，压缩可能降低前缀缓存命中率。** 命中按 528 token 的块对齐。压缩后第 1–3 轮的共同前缀都不足 528 token，8 个会话轮转时命中率从 53% 降到 29%（[K2](docs/results/K2_RESULTS.md)）。
-4. **高负载下，挑选 token 的开销不能忽略。** PyTorch 版 DivPrune 的循环受 kernel 启动开销限制，每张图约 1600 个小 kernel。合并成一个 Triton kernel 后，吞吐与随机挑选持平，精度不变（差 ≤ 0.4 分）。
-
-不压缩时两个模型经同一条 `vllm serve` 路径测得的精度（[W1](docs/results/W1_RESULTS.md)）：
-
-| 任务（指标） | Qwen3-VL-4B-Instruct | Qwen3.5-4B |
+| 阶段 | 做什么 | 图像 token 在这里的成本 |
 |---|---|---|
-| ChartQA test（relaxed acc.） | 84.04 [82.68, 85.48] | 85.28 [84.00, 86.64] |
-| TextVQA val（exact match） | 80.50 [79.47, 81.51] | 82.53 [81.62, 83.46] |
-| DocVQA val（ANLS） | 94.75 [94.21, 95.27] | 95.56 [95.06, 96.05] |
+| 视觉编码器（ViT） | 把像素变成图像 token | 计算量，随像素数增长 |
+| prefill | 语言模型把整个 prompt 读一遍 | 计算量，随 prompt 长度增长 |
+| KV 缓存 | 回答期间，prompt 的每个 token 都要留在显存里 | 显存，决定同时能跑多少个请求 |
+| decode | 模型一个 token 一个 token 地写回答 | 每一步都要读 KV 缓存 |
 
-OCR 平均相对 B0 的精度变化（[W3 §4b.3](docs/results/W3_RESULTS.md)）：
+减少图像 token 有两种做法：
+
+- **降分辨率**：在视觉编码器之前把图片缩小。后面每个阶段都变便宜，编码器本身也是。
+- **裁剪**：先让编码器处理完整的图，再从输出里只留一部分 token。仓库实现了随机挑选、2×2 池化、[DivPrune](https://github.com/vbdi/divprune)（留下彼此差别最大的 token），以及 vLLM PR [#60963](https://github.com/vllm-project/vllm/pull/60963) 里的 RATE。裁剪可以挑出信息量大的 token，但编码器照样要跑完整张图。
+
+两种做法在相同的 token 预算下比较（保留 50%、25%、12.5%），对照组是同一个模型不压缩（记作 B0）。
+
+### 2. 怎么测的
+
+- **两个注意力结构不同的模型。** Qwen3-VL-4B-Instruct 每一层都是全注意力，每个 token 在每一层都要占 KV 缓存。Qwen3.5-4B 是混合结构，32 层里只有 8 层是全注意力，其余层保存的是大小固定的状态。一个 token 在 Qwen3-VL 上占 144 KiB KV 缓存，在 Qwen3.5 上占 32 KiB。
+- **精度**：ChartQA、TextVQA、DocVQA（下文的"OCR 平均"就是这三项的平均），以及 MME、MMBench。全部走和线上服务相同的 `vllm serve` 路径。每种方法都和自己模型的 B0 逐题配对比较，区间是配对 bootstrap 95% 置信区间。
+- **三种服务负载**，每种专门打在一个瓶颈上。**P**：4 张图、回答很短，瓶颈是 prefill 计算。**D**：1 张图、回答 512 个 token，瓶颈是 decode。**K1**：KV 缓存固定为 4 GiB，瓶颈是显存。
+- **每次运行前先写下假设和判据**（[`docs/plans/`](docs/plans/)）。报告逐条给出结论，被证伪的假设也照实写。
+- 硬件说明：持续高负载时，L40 触及 300 W 功耗上限，时钟从约 2250 MHz 降到约 1550 MHz（[FOLLOWUP3](docs/results/FOLLOWUP3_RESULTS.md)）。所有吞吐数字都是在这种状态下测的，这也是这张卡在生产环境里的实际状态。
+
+### 3. 发现
+
+#### 3.1 精度：OCR 类任务上，降分辨率掉分最少
+
+OCR 平均相对 B0 的变化，单位是分（[W3](docs/results/W3_RESULTS.md)）：
 
 | 模型 | 方法 | 保留 50% | 保留 25% | 保留 12.5% |
 |---|---|---|---|---|
 | Qwen3-VL-4B-Instruct | 降分辨率 | **−2.2** | **−10.2** | **−22.5** |
-| | RATE（`rate`） | −5.4 | −24.4 | −41.1 |
+| | RATE | −5.4 | −24.4 | −41.1 |
 | | DivPrune | −6.3 | −18.5 | −34.8 |
 | | 随机 | −8.7 | −26.2 | −44.1 |
 | Qwen3.5-4B | 降分辨率 | **−2.0** | **−9.0** | **−21.7** |
-| | RATE（`rate`） | −2.2 | −11.4 | −31.9 |
+| | RATE | −2.2 | −11.4 | −31.9 |
 | | DivPrune | −4.8 | −15.7 | −31.3 |
 | | 随机 | −11.9 | −32.8 | −49.4 |
 
-### 方法与用法
+一个可能的原因（没有直接验证）：图表和文档里的文字又大又密，图片缩小后文字全都还在，只是稍微模糊。裁剪会整块拿掉一些区域，答案有时正好在被拿掉的地方。裁剪只在一种情况下胜出：TextVQA 的文字只占自然照片里的一小块，Qwen3.5 上 RATE 保留 50% 的精度变化是 −0.4 [−1.2, +0.5]，降分辨率是 −2.6 [−3.9, −1.3]。
 
-| `VTS_METHOD` | 做法 |
-|---|---|
-| `none` | 插件不生效（原版 vLLM） |
-| `downsample` | 在 HF 预处理器之前把图像每条边缩小到 √keep |
-| `random` | 按（种子，token 数）固定的随机子集 |
-| `pool2x2` | 对合并后的 token 网格做 2×2 平均池化 |
-| `divprune` | 贪心 max-min 多样性挑选，按 [DivPrune 官方代码](https://github.com/vbdi/divprune)实现；设 `VTS_DIVPRUNE_IMPL=triton` 用融合 kernel |
-| `rate` | vLLM PR [#60963](https://github.com/vllm-project/vllm/pull/60963) 的 RATE，投影分数改为降序排序 |
-| `rate_pr` | PR 在 `06158cbe` 时的原样实现。它的升序排序会让所有输入都只保留前缀（[已指出](https://github.com/vllm-project/vllm/pull/60963#issuecomment-6321576342)） |
-| `rate_orig` | PR 作者修复后的版本（`45333ba`），逐行照抄 |
+#### 3.2 计算是瓶颈时，裁剪仍然要付视觉编码器的钱
 
-其他环境变量：`VTS_KEEP`（保留比例，默认 1.0）、`VTS_SEED`（默认 0）、`VTS_TAIL`、`VTS_VIT_TRACE=<dir>`（每次 ViT 调用计时）、`VTS_STEP_TRACE=<dir>`（引擎每步计时）。完整说明见 [`src/vts_plugin/config.py`](src/vts_plugin/config.py)。插件在 vLLM 中的挂载方式按请求路径逐步讲解，见中文代码导读 [`docs/CODE_GUIDE_zh.md`](docs/CODE_GUIDE_zh.md)。
+单个请求里，视觉编码器大约占首 token 延迟的四分之一。裁剪是在完整的图上跑编码器，所以这四分之一省不下来（[W4 §1](docs/results/W4_RESULTS.md)）。在 prefill 受限的 P 负载下满载运行（并发 64，保留 50%），这个差距体现在吞吐上（[W4 §5](docs/results/W4_RESULTS.md)）：
+
+| | 降分辨率 | 随机、RATE | DivPrune |
+|---|---|---|---|
+| 吞吐相对 B0 | 1.94–2.13× | 1.49–1.63× | 1.19–1.32× |
+
+把精度和吞吐放在一起看，降分辨率在两个模型上都处于前沿。想要 RATE 保留 25% 的吞吐，用降分辨率保留 50% 就够了，掉的精度少得多（[W4 §7](docs/results/W4_RESULTS.md)）。
+
+![精度与吞吐](docs/figures/pareto.png)
+
+#### 3.3 显存是瓶颈时，注意力结构决定收益
+
+KV 缓存大小固定时（K1 负载，保留 50%，并发 128），每个请求的图像 token 少了，显存里就能同时放下更多请求（[W4 §3](docs/results/W4_RESULTS.md)）：
+
+| | Qwen3-VL-4B-Instruct（全注意力） | Qwen3.5-4B（混合注意力） |
+|---|---|---|
+| 同时运行的请求数相对 B0 | 1.744–1.768× | 1.267–1.280× |
+| 吞吐相对 B0，降分辨率 | 1.81× | 1.43× |
+| 吞吐相对 B0，裁剪 | 1.43–1.62× | 1.12–1.26× |
+
+混合模型收益小，是因为它四分之三的层保存的是大小固定的状态，不随 prompt 变长，所以砍掉 token 省下的显存少。一个按块计数的 KV 缓存模型在运行前写好，预测这些增益的误差在 4% 以内。后来又用它预测两个新条件，实测 ÷ 预测在 0.937–1.064 之间（[FOLLOWUP](docs/results/FOLLOWUP_RESULTS.md)）。decode 阶段也是同样的规律（D 负载，并发 64）：每个输出 token 的耗时，Qwen3-VL 降低 25–28%，Qwen3.5 降低 9–15%（[W4 §6](docs/results/W4_RESULTS.md)）。
+
+![不同负载下的吞吐收益](docs/figures/throughput_by_workload.png)
+
+#### 3.4 混合模型上，压缩可能降低前缀缓存命中率
+
+围绕一张图的多轮对话里，vLLM 会复用前几轮已经缓存的 token。压缩让每段对话变小，缓存能装下更多对话：Qwen3-VL 多装 1.57–1.59 倍，Qwen3.5 多装 1.17–1.20 倍。但混合模型只能以 528 个 token 为一块来复用缓存。压缩之后，第 1 到 3 轮的共同历史不到一块，8 段对话轮转时，命中率从 53% 降到 29%（[K2](docs/results/K2_RESULTS.md)）。
+
+#### 3.5 高负载下，实现成本不能忽略
+
+- **挑选 token 的开销可能和编码器一样大。** PyTorch 版 DivPrune 一次挑一个 token，每张图要启动约 1600 个小 GPU kernel，一共 25.66 ms。换成一个 Triton kernel 后只要 0.419 ms，快 61 倍。它在 P 负载上的吞吐从 1.28× 升到 1.58×，和随机挑选一样，精度不变（[W5](docs/results/W5_RESULTS.md)）。
+- **压缩可以和 FP8 权重叠加。** 单用 FP8，吞吐提升 1.45×（Qwen3-VL）和 1.56×（Qwen3.5），精度不变。FP8 加降分辨率保留 50%，提升到 3.05× 和 3.06×（[W5](docs/results/W5_RESULTS.md)）。
+
+#### 3.6 实际该怎么用
+
+先试降分辨率。在这两个模型上，它在每种负载下吞吐都最高，OCR 平均掉分也最少。它能换来多少吞吐，取决于瓶颈：prefill 计算是瓶颈时约 2 倍，KV 显存是瓶颈时 1.4–1.8 倍，decode 是瓶颈时 1.3–1.4 倍。显存受限时的收益，混合注意力模型比全注意力模型小得多。裁剪只在 Qwen3.5 的自然场景小字上领先。如果要用裁剪，先确认挑选步骤够快。所有数字都来自两个 4B 模型、一种 GPU 和合成的服务负载，换成别的模型、图片尺寸或硬件，结论的天平可能会移动。
+
+### 4. 插件怎么工作
+
+vLLM 启动时通过 `vllm.general_plugins` 入口点加载插件。插件不改 vLLM 的任何代码，不设 `VTS_METHOD` 时什么也不做。
+
+1. **先把位置让出来。** 请求进来时，插件把 prompt 里每张图的占位符缩短到要保留的 token 数。从这一刻起，调度器和 KV 缓存看到的都是更小的数字。降分辨率则在这一步直接缩小图片。
+2. **安全地跑视觉编码器。** 开启裁剪后，vLLM 的调度器一步放进的图片会超过它启动时测过的量，可能导致显存不足（[vllm#63187](https://github.com/vllm-project/vllm/issues/63187)）。插件把图片分组送进编码器，每组不超过启动时测过的量。
+3. **挑出 token，放回原位。** 留下的 token 按它们在原图里的二维位置（M-RoPE）放回，模型仍然知道每个 token 在图上的什么地方。这一步复用了 vLLM 为视频帧裁剪准备的路径。
+
+带行号的逐步讲解见中文代码导读 [`docs/CODE_GUIDE_zh.md`](docs/CODE_GUIDE_zh.md)。
+
+### 5. 过程中发现的问题
+
+做插件和评测时，在 vLLM 里发现了三个问题，都已报告给上游：
+
+- [vllm#63187](https://github.com/vllm-project/vllm/issues/63187)：开启裁剪后，调度器按裁剪后的 token 数给视觉编码器分配预算，一步可能送进数倍于启动时测过的量，导致显存不足。插件绕开了这个问题（上面第 2 步）。
+- [vllm#62937](https://github.com/vllm-project/vllm/issues/62937)：transformers ≥ 5.10 时，Qwen3-VL 视频裁剪后重算的位置整体错位。文本前缀短时服务直接崩溃，前缀长时静默用错位置。
+- [PR #60963 下的评论](https://github.com/vllm-project/vllm/pull/60963#issuecomment-6321576342)：排序方向的 bug 让 RATE 对每张图都只留下最前面的 token，而不是挑出来的 token。插件同时保留了修正版（`rate`）和原样版（`rate_pr`）。
+
+### 6. 怎么用
 
 ```bash
 # 环境中需要 vllm==0.32.0
@@ -225,7 +298,20 @@ pip install --no-deps .
 VTS_METHOD=downsample VTS_KEEP=0.5 vllm serve Qwen/Qwen3-VL-4B-Instruct
 ```
 
-`vts-bench` 复现了测量协议：每个（模型，方法）组合单独起一个服务；正式测量前先做一次热身，热身用单独的种子，结果丢弃；每个测量点的种子在所有方法之间共用，以便配对比较；负载由 `vllm bench serve` 生成，是闭环的合成负载。
+| `VTS_METHOD` | 做法 |
+|---|---|
+| `none` | 插件不生效（原版 vLLM） |
+| `downsample` | 预处理前把图片每条边缩小到 √keep |
+| `random` | 固定的随机子集 |
+| `pool2x2` | 每个 2×2 的 token 块取平均 |
+| `divprune` | 留下彼此差别最大的 token。加 `VTS_DIVPRUNE_IMPL=triton` 用快速 kernel |
+| `rate` | 修正排序方向后的 RATE |
+| `rate_pr` | PR #60963 最初写法的 RATE |
+| `rate_orig` | PR 作者修复后的 RATE（`45333ba`） |
+
+`VTS_KEEP` 设定保留比例（默认 1.0）。`VTS_VIT_TRACE=<dir>` 和 `VTS_STEP_TRACE=<dir>` 分别记录每次编码器调用和每个引擎步的耗时。全部选项见 [`src/vts_plugin/config.py`](src/vts_plugin/config.py)。
+
+`vts-bench` 按同样的协议跑上面的测量：每个模型和方法组合单独起一个服务，先做一次热身并丢弃结果，所有方法使用相同的请求种子，这样可以逐个请求对比。
 
 ```bash
 export VTS_ROOT=/path/to/root               # 其下有 envs/vts、models/<模型名>、tasks_local/
@@ -236,24 +322,23 @@ vts-bench summarize serve runs/p/results    # 相对 B0 的增益，按重复次
 vts-bench accuracy --methods none downsample --tasks vts_chartqa vts_textvqa_val --out runs/acc
 ```
 
-| 预设 | 请求形状 | 瓶颈 |
+### 7. 复现结果
+
+[`docs/results/`](docs/results/) 里的每份报告都写明了产出它的 [`experiments/`](experiments/) 脚本（每个里程碑一个目录），以及判定时依据的方案。
+
+| 报告 | 内容 | 脚本 |
 |---|---|---|
-| `P` | 4 张 896×896 图，输入 64 个文本 token，输出 32 | prefill 计算，`--max-num-batched-tokens` 扫 2048 和 8192 |
-| `D` | 1 张图，输出 512 | decode |
-| `K1` | 2 张图，输出 256，两个模型用同样的 KV 字节预算 | KV 容量 |
+| [W1](docs/results/W1_RESULTS.md) | 不压缩时的精度与服务基线 | `experiments/w1/` |
+| [W2](docs/results/W2_RESULTS.md) | 插件正确性，与 Hugging Face transformers 交叉核对 | `experiments/w2/` |
+| [W3](docs/results/W3_RESULTS.md) | 各方法在三档预算下的精度 | `experiments/w3/`、`experiments/routec/` |
+| [W4](docs/results/W4_RESULTS.md) | P、D、K1 三种负载，以及精度–吞吐前沿 | `experiments/w4/` |
+| [W5](docs/results/W5_RESULTS.md) | Triton DivPrune 和 FP8 | `experiments/w5/` |
+| [K2](docs/results/K2_RESULTS.md)、[FOLLOWUP](docs/results/FOLLOWUP_RESULTS.md)、[FOLLOWUP2](docs/results/FOLLOWUP2_RESULTS.md)、[FOLLOWUP3](docs/results/FOLLOWUP3_RESULTS.md) | 前缀缓存、显存模型检验、功耗降频 | `experiments/w6/` |
 
-`tests/test_bench.py` 检查它和原始实验脚本生成的命令一致，并且在相同输入上算出相同的统计量。
+有三道检查把代码和已发布的数字绑在一起。`tests/test_selection_hashes.py` 把每种挑选方法锁定在产出结果的那个版本上。`tests/test_bench.py` 检查 `vts-bench` 生成的命令和算出的统计量与原始脚本一致。`experiments/w2/compare_builds.sh` 用两个版本的插件回答同一批问题，逐条比对答案。
 
-### 复现已发布的数字
-
-上面的表格由 `experiments/` 下的脚本产出，每个里程碑一个目录，每个脚本的用法写在文件开头。每次运行前的假设和判据记录在 [`docs/plans/`](docs/plans/)，结果文档按这些判据逐条给出结论，包括被证伪的假设。`tests/test_selection_hashes.py` 把每种方法的挑选结果锁定在产出这些结果时的代码版本上。
-
-### 上游报告
-
-- [vllm-project/vllm#63187](https://github.com/vllm-project/vllm/issues/63187)：开启多模态裁剪后，调度器按裁剪后的 token 数扣减编码器预算，一步可能放进数倍于 profile 的 ViT 输入，导致显存不足。插件在 `src/vts_plugin/vitbatch.py` 中绕开了这个问题。
-- [vllm-project/vllm#62937](https://github.com/vllm-project/vllm/issues/62937)：transformers ≥ 5.10 时，Qwen3-VL 视频裁剪后重算的 M-RoPE 位置整体错位（文本前缀短时直接崩溃，前缀长时静默写错位置）。
-- [PR #60963 下的评论](https://github.com/vllm-project/vllm/pull/60963#issuecomment-6321576342)：RATE 的升序排序使分桶分母恒为负，导致 PR 对任何输入都只保留前缀。
+目录结构见上方英文部分第 7 节末尾。
 
 ### 许可证
 
-Apache-2.0，见 [NOTICE](NOTICE)。
+Apache-2.0。`rate_pr`、`rate_orig` 和 `tests/fixtures/rate_pr_45333ba.py` 改编自 vLLM PR #60963（Apache-2.0，版权归 vLLM 项目贡献者），见 [NOTICE](NOTICE)。
