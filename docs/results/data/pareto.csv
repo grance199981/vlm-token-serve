@@ -1,0 +1,11 @@
+model,config,method,keep,throughput_gain,ocr_avg_delta,source
+Qwen3-VL-4B-Instruct,B0,none,1.0,1.00,0.0,W4_RESULTS.md 7.1
+Qwen3-VL-4B-Instruct,downsample 50%,downsample,0.5,2.05,-2.2,W4_RESULTS.md 7.1
+Qwen3-VL-4B-Instruct,RATE 50%,rate,0.5,1.57,-5.4,W4_RESULTS.md 7.1
+Qwen3-VL-4B-Instruct,downsample 25%,downsample,0.25,3.67,-10.2,W4_RESULTS.md 7.1
+Qwen3-VL-4B-Instruct,RATE 25%,rate,0.25,2.11,-24.4,W4_RESULTS.md 7.1
+Qwen3.5-4B,B0,none,1.0,1.00,0.0,W4_RESULTS.md 7.1
+Qwen3.5-4B,downsample 50%,downsample,0.5,2.13,-2.0,W4_RESULTS.md 7.1
+Qwen3.5-4B,RATE 50%,rate,0.5,1.61,-2.2,W4_RESULTS.md 7.1
+Qwen3.5-4B,downsample 25%,downsample,0.25,3.68,-9.0,W4_RESULTS.md 7.1
+Qwen3.5-4B,RATE 25%,rate,0.25,2.07,-11.4,W4_RESULTS.md 7.1

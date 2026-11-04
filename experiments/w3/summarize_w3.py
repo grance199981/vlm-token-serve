@@ -10,7 +10,7 @@ Per task score per sample:
   mme: aggregate perception / cognition from results.json (no per-sample CI)
 Delta = config - B0 on the same doc_ids, paired bootstrap 95% CI (2000, seed 0).
 Only configs whose valid.txt is "yes" are used; runs that predate valid.txt need
---include-unchecked model/config (checked by hand, see sessions.md).
+--include-unchecked model/config (checked by hand).
 """
 import argparse
 import csv
