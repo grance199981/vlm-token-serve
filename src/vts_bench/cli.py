@@ -21,6 +21,8 @@ def _common(p: argparse.ArgumentParser):
                         "rate_pr | rate_orig | downsample")
     p.add_argument("--keep", type=float, default=0.5)
     p.add_argument("--port", type=int)
+    p.add_argument("--allow-shared-gpu", action="store_true",
+                   help="start even if another process holds memory on the GPU (accuracy checks only)")
 
 
 def main(argv=None) -> int:
@@ -60,7 +62,9 @@ def main(argv=None) -> int:
     if not args.root:
         ap.error("--root or $VTS_ROOT is required")
     methods = [parse_method(t, args.keep) for t in args.methods]
-    gpu = os.environ.get("CUDA_VISIBLE_DEVICES")
+    gpu = None if args.allow_shared_gpu else os.environ.get("CUDA_VISIBLE_DEVICES")
+    if args.cmd == "serve" and args.allow_shared_gpu:
+        ap.error("--allow-shared-gpu is for accuracy runs; timing needs a GPU of its own")
     if args.cmd == "serve":
         w = WORKLOADS[args.preset]
         budgets = tuple(args.budgets or (["2048", "8192"] if w.name == "P" else ["default"]))

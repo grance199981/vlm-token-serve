@@ -190,3 +190,5 @@ def test_cli_rejects_unknown_preset_and_method_combinations():
     from vts_bench import cli
     with pytest.raises(SystemExit):
         cli.main(["serve", "--out", "/o", "--preset", "X"])
+    with pytest.raises(SystemExit):  # timing runs never share a GPU
+        cli.main(["serve", "--root", "/r", "--out", "/o", "--preset", "P", "--allow-shared-gpu"])
