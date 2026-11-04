@@ -158,6 +158,14 @@ Apache-2.0. `rate_pr`, `rate_orig` and `tests/fixtures/rate_pr_45333ba.py` are a
 
 数字全部来自 `docs/results/`。精度只和各模型自己的不压缩运行（B0）比较，区间是配对 bootstrap 95% CI。serving 在单张 NVIDIA L40 48 GB 上测量，vLLM 0.32.0。持续高负载时 L40 触及 300 W 功耗上限，bf16 的 SM 时钟从约 2250 MHz 降到约 1550 MHz（[FOLLOWUP3](docs/results/FOLLOWUP3_RESULTS.md)），所以所有吞吐数字都是在功耗降频状态下测得的。
 
+**精度–吞吐**：横轴是 P 负载（prefill 受限）并发 64 时相对 B0 的吞吐倍数，纵轴是 OCR 平均（TextVQA、ChartQA、DocVQA）相对 B0 的精度变化，点旁标的是保留率。
+
+![精度与吞吐](docs/figures/pareto.png)
+
+**不同负载下的吞吐收益**：保留 50%，从左到右依次是 P（prefill 受限，4 张图、输出 32）、D（decode 受限，1 张图、输出 512）、K1（KV 受限，KV 4 GiB、2 张图）三种负载。
+
+![不同负载下的吞吐收益](docs/figures/throughput_by_workload.png)
+
 | 发现 | Qwen3-VL-4B-Instruct（全注意力） | Qwen3.5-4B（混合注意力） | 出处 |
 |---|---|---|---|
 | prefill 受限负载的吞吐，保留 50%，并发 64。降分辨率省掉一部分 ViT 计算，裁剪省不掉 | 降分辨率 2.05–2.08×，随机和 RATE 1.57–1.63× | 降分辨率 1.94–2.13×，随机和 RATE 1.49–1.61× | [W4 §5](docs/results/W4_RESULTS.md) |
@@ -175,11 +183,41 @@ Apache-2.0. `rate_pr`, `rate_orig` and `tests/fixtures/rate_pr_45333ba.py` are a
 3. **在混合模型上，压缩可能降低前缀缓存命中率。** 命中按 528 token 的块对齐。压缩后第 1–3 轮的共同前缀都不足 528 token，8 个会话轮转时命中率从 53% 降到 29%（[K2](docs/results/K2_RESULTS.md)）。
 4. **高负载下，挑选 token 的开销不能忽略。** PyTorch 版 DivPrune 的循环受 kernel 启动开销限制，每张图约 1600 个小 kernel。合并成一个 Triton kernel 后，吞吐与随机挑选持平，精度不变（差 ≤ 0.4 分）。
 
-精度基线和各方法、各保留率的精度变化见上方英文部分的两张表，以及 [W1](docs/results/W1_RESULTS.md)、[W3](docs/results/W3_RESULTS.md)。
+不压缩时两个模型经同一条 `vllm serve` 路径测得的精度（[W1](docs/results/W1_RESULTS.md)）：
+
+| 任务（指标） | Qwen3-VL-4B-Instruct | Qwen3.5-4B |
+|---|---|---|
+| ChartQA test（relaxed acc.） | 84.04 [82.68, 85.48] | 85.28 [84.00, 86.64] |
+| TextVQA val（exact match） | 80.50 [79.47, 81.51] | 82.53 [81.62, 83.46] |
+| DocVQA val（ANLS） | 94.75 [94.21, 95.27] | 95.56 [95.06, 96.05] |
+
+OCR 平均相对 B0 的精度变化（[W3 §4b.3](docs/results/W3_RESULTS.md)）：
+
+| 模型 | 方法 | 保留 50% | 保留 25% | 保留 12.5% |
+|---|---|---|---|---|
+| Qwen3-VL-4B-Instruct | 降分辨率 | **−2.2** | **−10.2** | **−22.5** |
+| | RATE（`rate`） | −5.4 | −24.4 | −41.1 |
+| | DivPrune | −6.3 | −18.5 | −34.8 |
+| | 随机 | −8.7 | −26.2 | −44.1 |
+| Qwen3.5-4B | 降分辨率 | **−2.0** | **−9.0** | **−21.7** |
+| | RATE（`rate`） | −2.2 | −11.4 | −31.9 |
+| | DivPrune | −4.8 | −15.7 | −31.3 |
+| | 随机 | −11.9 | −32.8 | −49.4 |
 
 ### 方法与用法
 
-支持的方法见上方英文部分的 Methods 表，环境变量的完整说明见 [`src/vts_plugin/config.py`](src/vts_plugin/config.py)。插件在 vLLM 中的挂载方式按请求路径逐步讲解，见中文代码导读 [`docs/CODE_GUIDE_zh.md`](docs/CODE_GUIDE_zh.md)。
+| `VTS_METHOD` | 做法 |
+|---|---|
+| `none` | 插件不生效（原版 vLLM） |
+| `downsample` | 在 HF 预处理器之前把图像每条边缩小到 √keep |
+| `random` | 按（种子，token 数）固定的随机子集 |
+| `pool2x2` | 对合并后的 token 网格做 2×2 平均池化 |
+| `divprune` | 贪心 max-min 多样性挑选，按 [DivPrune 官方代码](https://github.com/vbdi/divprune)实现；设 `VTS_DIVPRUNE_IMPL=triton` 用融合 kernel |
+| `rate` | vLLM PR [#60963](https://github.com/vllm-project/vllm/pull/60963) 的 RATE，投影分数改为降序排序 |
+| `rate_pr` | PR 在 `06158cbe` 时的原样实现。它的升序排序会让所有输入都只保留前缀（[已指出](https://github.com/vllm-project/vllm/pull/60963#issuecomment-6321576342)） |
+| `rate_orig` | PR 作者修复后的版本（`45333ba`），逐行照抄 |
+
+其他环境变量：`VTS_KEEP`（保留比例，默认 1.0）、`VTS_SEED`（默认 0）、`VTS_TAIL`、`VTS_VIT_TRACE=<dir>`（每次 ViT 调用计时）、`VTS_STEP_TRACE=<dir>`（引擎每步计时）。完整说明见 [`src/vts_plugin/config.py`](src/vts_plugin/config.py)。插件在 vLLM 中的挂载方式按请求路径逐步讲解，见中文代码导读 [`docs/CODE_GUIDE_zh.md`](docs/CODE_GUIDE_zh.md)。
 
 ```bash
 # 环境中需要 vllm==0.32.0
@@ -187,7 +225,24 @@ pip install --no-deps .
 VTS_METHOD=downsample VTS_KEEP=0.5 vllm serve Qwen/Qwen3-VL-4B-Instruct
 ```
 
-`vts-bench` 复现了测量协议：每个（模型，方法）组合单独起一个服务；正式测量前先做一次热身，热身用单独的种子，结果丢弃；每个测量点的种子在所有方法之间共用，以便配对比较；负载由 `vllm bench serve` 生成，是闭环的合成负载。用法和预设见英文部分的 Benchmark CLI 一节。`tests/test_bench.py` 检查它和原始实验脚本生成的命令一致，并且在相同输入上算出相同的统计量。
+`vts-bench` 复现了测量协议：每个（模型，方法）组合单独起一个服务；正式测量前先做一次热身，热身用单独的种子，结果丢弃；每个测量点的种子在所有方法之间共用，以便配对比较；负载由 `vllm bench serve` 生成，是闭环的合成负载。
+
+```bash
+export VTS_ROOT=/path/to/root               # 其下有 envs/vts、models/<模型名>、tasks_local/
+export CUDA_VISIBLE_DEVICES=GPU-xxxxxxxx    # 填 GPU UUID；卡上已有其他进程时拒绝启动
+vts-bench serve --preset P --methods none downsample random rate divprune_triton --concurrency 1 8 32 64 --out runs/p
+vts-bench serve --preset K1 --kv-bytes 4294967296 --concurrency 128 --out runs/k1
+vts-bench summarize serve runs/p/results    # 相对 B0 的增益，按重复次数配对
+vts-bench accuracy --methods none downsample --tasks vts_chartqa vts_textvqa_val --out runs/acc
+```
+
+| 预设 | 请求形状 | 瓶颈 |
+|---|---|---|
+| `P` | 4 张 896×896 图，输入 64 个文本 token，输出 32 | prefill 计算，`--max-num-batched-tokens` 扫 2048 和 8192 |
+| `D` | 1 张图，输出 512 | decode |
+| `K1` | 2 张图，输出 256，两个模型用同样的 KV 字节预算 | KV 容量 |
+
+`tests/test_bench.py` 检查它和原始实验脚本生成的命令一致，并且在相同输入上算出相同的统计量。
 
 ### 复现已发布的数字
 
