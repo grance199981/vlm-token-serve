@@ -1,0 +1,393 @@
+{
+ "generated_from": "https://huggingface.co/api",
+ "assets": [
+  {
+   "kind": "models",
+   "repo": "Qwen/Qwen3.5-4B",
+   "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+   "local_dir": "models/Qwen3.5-4B",
+   "license": "apache-2.0",
+   "total_bytes": 9342907469,
+   "files": [
+    {
+     "path": ".gitattributes",
+     "size": 1570,
+     "sha256": null,
+     "git_blob_sha1": "52373fe24473b1aa44333d318f578ae6bf04b49b"
+    },
+    {
+     "path": "LICENSE",
+     "size": 11544,
+     "sha256": null,
+     "git_blob_sha1": "f938136e3adacfd92be087f6e113b5d6d97f678f"
+    },
+    {
+     "path": "README.md",
+     "size": 77661,
+     "sha256": null,
+     "git_blob_sha1": "7950a3aadf378cd13758097bc52f0ed849a59007"
+    },
+    {
+     "path": "chat_template.jinja",
+     "size": 7756,
+     "sha256": null,
+     "git_blob_sha1": "a585dec894e63da457d9440ec6aa7caa16d20860"
+    },
+    {
+     "path": "config.json",
+     "size": 3161,
+     "sha256": null,
+     "git_blob_sha1": "557d961b205319c6a7da5f757f565b69b3967b7d"
+    },
+    {
+     "path": "merges.txt",
+     "size": 3353259,
+     "sha256": null,
+     "git_blob_sha1": "a494e019ca1502219fd0128658b979e5f05ae8e8"
+    },
+    {
+     "path": "model.safetensors-00001-of-00002.safetensors",
+     "size": 5329398688,
+     "sha256": "26a93f066e1916adb13453dae5a0c707c0fbc71299ed98779571a907b8e74c61",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "model.safetensors-00002-of-00002.safetensors",
+     "size": 3990429408,
+     "sha256": "cb544bd9bfae93dc59b0f22b292f5933573854a7f9b97835c67060d7d910e188",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "model.safetensors.index.json",
+     "size": 76196,
+     "sha256": null,
+     "git_blob_sha1": "fddda6039f7c1d17260c9e923b8a72fd025d9a86"
+    },
+    {
+     "path": "preprocessor_config.json",
+     "size": 390,
+     "sha256": null,
+     "git_blob_sha1": "2ea84a437d448ff71b08df68fdd949d5cc4ebb64"
+    },
+    {
+     "path": "tokenizer.json",
+     "size": 12807982,
+     "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "tokenizer_config.json",
+     "size": 16710,
+     "sha256": null,
+     "git_blob_sha1": "eda48d3e75a8e59a8479ee4ec8b37f76e711d9c1"
+    },
+    {
+     "path": "video_preprocessor_config.json",
+     "size": 385,
+     "sha256": null,
+     "git_blob_sha1": "3ba673a5ad7d4d13f54155ecd38b2a94a6dac8fe"
+    },
+    {
+     "path": "vocab.json",
+     "size": 6722759,
+     "sha256": null,
+     "git_blob_sha1": "0aa0ce0658d60ac4a5d609f4eadb0e8e43514176"
+    }
+   ]
+  },
+  {
+   "kind": "models",
+   "repo": "Qwen/Qwen3-VL-4B-Instruct",
+   "revision": "ebb281ec70b05090aa6165b016eac8ec08e71b17",
+   "local_dir": "models/Qwen3-VL-4B-Instruct",
+   "license": "apache-2.0",
+   "total_bytes": 8887292732,
+   "files": [
+    {
+     "path": ".gitattributes",
+     "size": 1519,
+     "sha256": null,
+     "git_blob_sha1": "a6344aac8c09253b3b630fb776ae94478aa0275b"
+    },
+    {
+     "path": "README.md",
+     "size": 7133,
+     "sha256": null,
+     "git_blob_sha1": "542417095b66d3fc13be22bbf6722928787b8ef4"
+    },
+    {
+     "path": "chat_template.json",
+     "size": 5502,
+     "sha256": null,
+     "git_blob_sha1": "e49e75bdda104c8de941eb20e0b3765184fb27bc"
+    },
+    {
+     "path": "config.json",
+     "size": 1505,
+     "sha256": null,
+     "git_blob_sha1": "22be8bb79043d39840ca5e70d7a2dab80311602c"
+    },
+    {
+     "path": "generation_config.json",
+     "size": 269,
+     "sha256": null,
+     "git_blob_sha1": "e116347d7ef42621c7a5957f82c015c38d939c1f"
+    },
+    {
+     "path": "merges.txt",
+     "size": 1671839,
+     "sha256": null,
+     "git_blob_sha1": "20024bfe7c83998e9aeaf98a0cd6a2ce6306c2f0"
+    },
+    {
+     "path": "model-00001-of-00002.safetensors",
+     "size": 4967229296,
+     "sha256": "30a01a0556622645a3cce87b655bbbbbc1f170c196099f1b666c93202c3339a9",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "model-00002-of-00002.safetensors",
+     "size": 3908490048,
+     "sha256": "046296a2a387efb43b0c997d5833c789604d168834f6e0d3064bf7bb13d002a6",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "model.safetensors.index.json",
+     "size": 64742,
+     "sha256": null,
+     "git_blob_sha1": "3b52de97496e2f4501dfa92a87642f60db3e22a1"
+    },
+    {
+     "path": "preprocessor_config.json",
+     "size": 390,
+     "sha256": null,
+     "git_blob_sha1": "2ea84a437d448ff71b08df68fdd949d5cc4ebb64"
+    },
+    {
+     "path": "tokenizer.json",
+     "size": 7032403,
+     "sha256": null,
+     "git_blob_sha1": "c6cc1014128b19d1fc46b1d30a23e3b1d35db421"
+    },
+    {
+     "path": "tokenizer_config.json",
+     "size": 10868,
+     "sha256": null,
+     "git_blob_sha1": "d3d3763207692c78780f4bf42d4dadf49a5c8012"
+    },
+    {
+     "path": "video_preprocessor_config.json",
+     "size": 385,
+     "sha256": null,
+     "git_blob_sha1": "3ba673a5ad7d4d13f54155ecd38b2a94a6dac8fe"
+    },
+    {
+     "path": "vocab.json",
+     "size": 2776833,
+     "sha256": null,
+     "git_blob_sha1": "4783fe10ac3adce15ac8f358ef5462739852c569"
+    }
+   ]
+  },
+  {
+   "kind": "datasets",
+   "repo": "lmms-lab/ChartQA",
+   "revision": "9e63b7df1592a1c2158e735cc1725454aef0d6d9",
+   "local_dir": "data/lmms-lab/ChartQA",
+   "license": null,
+   "total_bytes": 72614607,
+   "files": [
+    {
+     "path": ".gitattributes",
+     "size": 2307,
+     "sha256": null,
+     "git_blob_sha1": "28df5f900b358436f0267334b3e3e9af33f917ba"
+    },
+    {
+     "path": "README.md",
+     "size": 1307,
+     "sha256": null,
+     "git_blob_sha1": "21f4be8932d4f722c0d2efbaa74d79cd46a82152"
+    },
+    {
+     "path": "data/test-00000-of-00001.parquet",
+     "size": 72610993,
+     "sha256": "165263505f2998aba65d819b44be832edecd92d676fee2c030645f784cd55d06",
+     "git_blob_sha1": null
+    }
+   ]
+  },
+  {
+   "kind": "datasets",
+   "repo": "lmms-lab/textvqa",
+   "revision": "9c0699cd19768ac5ab97568f6b3cbac4c0062884",
+   "local_dir": "data/lmms-lab/textvqa",
+   "license": null,
+   "total_bytes": 920325848,
+   "files": [
+    {
+     "path": ".gitattributes",
+     "size": 2307,
+     "sha256": null,
+     "git_blob_sha1": "28df5f900b358436f0267334b3e3e9af33f917ba"
+    },
+    {
+     "path": "README.md",
+     "size": 2001,
+     "sha256": null,
+     "git_blob_sha1": "d1702416fd67874a5641e7424b6c9cf126c08d45"
+    },
+    {
+     "path": "data/validation-00000-of-00003.parquet",
+     "size": 310398494,
+     "sha256": "491649b5b8add2c5bde13a1e36707002fcd11898699255d65e2e568ac4fbddff",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "data/validation-00001-of-00003.parquet",
+     "size": 311190265,
+     "sha256": "909ad12a378217431548a7f4b66fda163a6def9d21e70844c96449e64206c2dd",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "data/validation-00002-of-00003.parquet",
+     "size": 298732781,
+     "sha256": "a770d03ec95fef58def04cda949d97669b7666caaf174af927856d75684e6fe6",
+     "git_blob_sha1": null
+    }
+   ]
+  },
+  {
+   "kind": "datasets",
+   "repo": "lmms-lab/DocVQA",
+   "revision": "539088ef8a8ada01ac8e2e6d4e372586748a265e",
+   "local_dir": "data/lmms-lab/DocVQA",
+   "license": "apache-2.0",
+   "total_bytes": 1055840024,
+   "files": [
+    {
+     "path": ".gitattributes",
+     "size": 2307,
+     "sha256": null,
+     "git_blob_sha1": "28df5f900b358436f0267334b3e3e9af33f917ba"
+    },
+    {
+     "path": "DocVQA/validation-00000-of-00006.parquet",
+     "size": 114817746,
+     "sha256": "a31507f0b700ac64f3ead52057c5dc3ccfb0baadcc62bc0d19d17159f080a4d8",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "DocVQA/validation-00001-of-00006.parquet",
+     "size": 160435747,
+     "sha256": "ce63ba45f11bfb4e17362f9c073984b4c6c84a0e966ba3d33a86fa285a1fb3dc",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "DocVQA/validation-00002-of-00006.parquet",
+     "size": 184452290,
+     "sha256": "2d580a39996ad05226ad462f2d31bad0df02f0f47f46263d96ad8df584a5667b",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "DocVQA/validation-00003-of-00006.parquet",
+     "size": 177861893,
+     "sha256": "588a587567d1548a174b83b160132d97eb2b12a7d57374675d3c45b431403354",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "DocVQA/validation-00004-of-00006.parquet",
+     "size": 206232388,
+     "sha256": "b43b8aa3e28a1b0f8728243fdf776b798a684b5baafb27d6a734edbbe3983302",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "DocVQA/validation-00005-of-00006.parquet",
+     "size": 212034964,
+     "sha256": "5bba6d5f7b8e6ee0b64df2e4c2885f93cd759c732998e4d6f9b86ce4c690fcf2",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "README.md",
+     "size": 2689,
+     "sha256": null,
+     "git_blob_sha1": "67f107df5895fe445cccf053d7c299d90add0610"
+    }
+   ]
+  },
+  {
+   "kind": "datasets",
+   "repo": "lmms-lab/MME",
+   "revision": "d6c9023f017b564f7b3ccccf5348166bce8fdbcd",
+   "local_dir": "data/lmms-lab/MME",
+   "license": null,
+   "total_bytes": 864021129,
+   "files": [
+    {
+     "path": ".gitattributes",
+     "size": 2357,
+     "sha256": null,
+     "git_blob_sha1": "ed037c7093daad9436e1248551713301da75e6b9"
+    },
+    {
+     "path": "README.md",
+     "size": 493,
+     "sha256": null,
+     "git_blob_sha1": "56cbc78cbf3e94289238e3e5a1da78cec9908227"
+    },
+    {
+     "path": "data/test-00000-of-00004-a25dbe3b44c4fda6.parquet",
+     "size": 34854593,
+     "sha256": "1563fd59c8049dbbabe211a049c38b2e20a6d58da94a75c90cfc937d1f6c52e3",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "data/test-00001-of-00004-7d22c7f1aba6fca4.parquet",
+     "size": 109541429,
+     "sha256": "3623728c0c98807cc7eef9cbd10dfa18c21654321c4b02b7b19bc8e6fc86d830",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "data/test-00002-of-00004-594798fd3f5b029c.parquet",
+     "size": 694888210,
+     "sha256": "c169d85bdf84e21b005170698217e96380bef172e8bd7432fc75ddce51dcaabe",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "data/test-00003-of-00004-53ae1794f93b1e35.parquet",
+     "size": 24734047,
+     "sha256": "aec84886b2bb6dd7bffc94eb3bbca9319e0671f3ee989a08e0758bc2de6c67f6",
+     "git_blob_sha1": null
+    }
+   ]
+  },
+  {
+   "kind": "datasets",
+   "repo": "lmms-lab/MMBench",
+   "revision": "56ba1af8954932c4804bd3f522e05ed96e63b654",
+   "local_dir": "data/lmms-lab/MMBench",
+   "license": null,
+   "total_bytes": 96599685,
+   "files": [
+    {
+     "path": ".gitattributes",
+     "size": 2307,
+     "sha256": null,
+     "git_blob_sha1": "28df5f900b358436f0267334b3e3e9af33f917ba"
+    },
+    {
+     "path": "README.md",
+     "size": 2194,
+     "sha256": null,
+     "git_blob_sha1": "b0b20853c11478a83aa9ef24e801e933bdacc9ca"
+    },
+    {
+     "path": "en/dev-00000-of-00001.parquet",
+     "size": 96595184,
+     "sha256": "765dc6a1a800831e89645d87bdae9ed47f4c8c5fb082bbd58121cd729f34eeb8",
+     "git_blob_sha1": null
+    }
+   ]
+  }
+ ]
+}

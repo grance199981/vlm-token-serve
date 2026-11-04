@@ -1,0 +1,97 @@
+{
+ "generated_from": "https://huggingface.co/api",
+ "assets": [
+  {
+   "kind": "datasets",
+   "repo": "danjacobellis/stvqa_task1",
+   "revision": "b291db9969118477a64f81470e5b33a9102b79e2",
+   "local_dir": "data/stvqa_task1",
+   "license": null,
+   "total_bytes": 2033834392,
+   "files": [
+    {
+     "path": ".gitattributes",
+     "size": 2419,
+     "sha256": null,
+     "git_blob_sha1": "55cab133643a2a73e083373d2106533678d0edd5"
+    },
+    {
+     "path": "README.md",
+     "size": 543,
+     "sha256": null,
+     "git_blob_sha1": "7004cb2efbf76e1b5d3be7e87f9c859ab0da3b3b"
+    },
+    {
+     "path": "data/train-00000-of-00006.parquet",
+     "size": 350665999,
+     "sha256": "d5251d6b6a31d483964d7e8940cb51002973ee4c722c9a2586f7eae5966fb5ed",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "data/train-00001-of-00006.parquet",
+     "size": 345302328,
+     "sha256": "2912ad037417aaab8766298f4f6e980f8616a903f49398e0eb78f1d0be6345bd",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "data/train-00002-of-00006.parquet",
+     "size": 331470365,
+     "sha256": "6a798d927c17f3fe07fdec77b434f798efe39cac4ee1e387d10be2a5aa97cedd",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "data/train-00003-of-00006.parquet",
+     "size": 333461744,
+     "sha256": "0980510f434533bf43821cc203ccbe8729ffc6e5bdf661d5d270e11805844929",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "data/train-00004-of-00006.parquet",
+     "size": 333956297,
+     "sha256": "efa8ce5af53be607f6239fd1efb6048317d4ae2e6c1796ad826e867836ec5d04",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "data/train-00005-of-00006.parquet",
+     "size": 338974697,
+     "sha256": "a40b32658b648a54051c9520d0ad45f285a276a54bb522a2b61fe71ec32b54d3",
+     "git_blob_sha1": null
+    }
+   ]
+  },
+  {
+   "kind": "datasets",
+   "repo": "lmms-lab/DocVQA",
+   "revision": "539088ef8a8ada01ac8e2e6d4e372586748a265e",
+   "local_dir": "data/lmms-lab/DocVQA",
+   "license": "apache-2.0",
+   "total_bytes": 266457648,
+   "files": [
+    {
+     "path": "InfographicVQA/validation-00000-of-00004.parquet",
+     "size": 63414360,
+     "sha256": "a71b63eca8d3cedc5bda7f7d2a4c959b041dca8766592675f6bd0ac49500775a",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "InfographicVQA/validation-00001-of-00004.parquet",
+     "size": 72073153,
+     "sha256": "12cbc18ad5a499deebca691fcdf9a852c3d3917e448b30dc604bfdfb4559e756",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "InfographicVQA/validation-00002-of-00004.parquet",
+     "size": 57944291,
+     "sha256": "0f4b8f8633105395d8acb5fd341311c614033f35d99cc25337e43c7fd905b3c1",
+     "git_blob_sha1": null
+    },
+    {
+     "path": "InfographicVQA/validation-00003-of-00004.parquet",
+     "size": 73025844,
+     "sha256": "254fdbd3f69499aca70292167f61d89430fb485b3f6a2fce939ab84f02ae5776",
+     "git_blob_sha1": null
+    }
+   ]
+  }
+ ]
+}
